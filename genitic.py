@@ -69,7 +69,7 @@ def mate(population, buffer):
 
 def genetic_algorithm():
     population = init_population()  # إنشاء الجيل الأول
-    buffer = [GAIndividual() for _ in range(GA_POPSIZE)]  # تحضير جيل جديد فارغ
+    buffer = init_population()  # تحضير جيل جديد فارغ
     stats = []  # لتخزين ملخص الإحصائيات لكل جيل
     all_fitness_per_generation = []  # لتخزين fitness لكل الأفراد في كل جيل (لـ boxplot)
 

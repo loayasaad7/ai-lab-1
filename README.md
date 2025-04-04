@@ -1,2 +1,3 @@
-# ai-lab-1
-this is the first lab on ai course
+hi this is the first commit from the first lab
+loay asaad
+mohammad selawe
