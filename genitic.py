@@ -10,7 +10,7 @@ GA_POPSIZE = 2048  # عدد السكان (الكروموسومات)
 GA_MAXITER = 1000  # الحد الأقصى لعدد الأجيال
 GA_ELITRATE = 0.10  # نسبة الأفراد الأفضل الذين نحتفظ بهم بدون تغيير
 GA_MUTATIONRATE = 0.25  # معدل الطفرة
-GA_TARGET = "Hello world!"  # الجملة الهدف
+GA_TARGET = "Mohammd Selawe"  # الجملة الهدف
 
 # تمثيل الفرد
 class GAIndividual:
