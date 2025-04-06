@@ -66,7 +66,6 @@ This helps analyze population diversity. A tight box indicates convergence, whil
 ### Question 4: Implementing Multiple Crossover Operators
 
 We implemented three types of crossover:
-
 - **SINGLE:** One random split point.
 - **TWO:** Two random split points.
 - **UNIFORM:** Mix genes randomly from both parents.
@@ -98,7 +97,6 @@ elif CROSSOVER_TYPE == "UNIFORM":
 We identified which parts of the algorithm contribute to:
 
 - **Exploration:**
-
   - Mutation: Introduces new, random traits.
   - Uniform crossover: Generates diverse offspring.
   - Random selection of parents (not just best ones).
@@ -117,11 +115,9 @@ Balancing both aspects is crucial to success.
 We compared the algorithm in 3 modes:
 
 - **a. Only crossover, no mutation:**
-
   - Converges, but may get stuck early.
 
 - **b. Only mutation, no crossover:**
-
   - Progress is very slow, random walk.
 
 - **c. Both enabled:**
@@ -145,16 +141,13 @@ elif FITNESS_MODE == "combined":
 ```
 
 #### a. Relevance to Crossover
-
 LCS preserves order. So when used with crossover, it encourages passing correct sequences.
 
 #### b. Comparison to Original Fitness
-
 - Original ASCII method rewards small character changes.
 - LCS focuses on correct order and character placement.
 
 #### c. Impact
-
 - **More structure in convergence**
 - **Maintains diversity better**
 - **May converge slower but yields cleaner solutions**
