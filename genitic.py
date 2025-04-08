@@ -110,6 +110,7 @@ def run_genetic_algorithm():
 
     for gen in range(MAX_GENERATIONS):
         start_time = time.time()
+        start_ticks = time.process_time()
 
         evaluate_population(current_generation)
         sort_population(current_generation)
@@ -122,17 +123,20 @@ def run_genetic_algorithm():
         avg = np.mean(fitness_values)
         std_dev = np.std(fitness_values)
         elapsed_time = time.time() - start_time
-
+        end_ticks = time.process_time()
+        clock_ticks = end_ticks - start_ticks
+        
         stats_log.append({
             "Generation": gen,
             "Best Fitness": best,
             "Worst Fitness": worst,
             "Average Fitness": avg,
             "Std Dev": std_dev,
-            "Elapsed Time (s)": elapsed_time
+            "Elapsed Time (s)": elapsed_time,
+            "Clock Ticks": clock_ticks
         })
 
-        print(f"Generation {gen}: Best={best}, Avg={avg:.2f}, Worst={worst}, StdDev={std_dev:.2f}")
+        print(f"Generation {gen}: Best={best}, Avg={avg:.2f}, Worst={worst}, StdDev={std_dev:.2f}, Elapsed Time={elapsed_time:.5f}s, Clock Ticks={clock_ticks:.5f}")
         print(f"Best match: {current_generation[0].genes}")
 
         # ✅ STOP IF EXACT MATCH FOUND
