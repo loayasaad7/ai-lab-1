@@ -153,14 +153,12 @@ def stochastic_tournament_selection(population, k, p):
 def select_parents(population, scaled_fitness=None, cumulative_scaled=None, total_scaled=None):
     if SELECTION_METHOD == "RWS":
         return roulette_wheel_selection(population, cumulative_scaled, total_scaled)
-    elif SELECTION_METHOD == "SUS":
-        return stochastic_universal_sampling(population, scaled_fitness, total_scaled)
     elif SELECTION_METHOD == "TOURNAMENT":
         return tournament_selection(population, TOURNAMENT_K)
     elif SELECTION_METHOD == "STOCHASTIC_TOURNAMENT":
         return stochastic_tournament_selection(population, TOURNAMENT_K, STOCHASTIC_P)
     else:
-        raise ValueError("Invalid selection method.")
+        raise ValueError("Invalid selection method or SUS should be handled in crossover()")
 
 def sort_population(population):
     population.sort(key=lambda x: x.fitness)
@@ -184,7 +182,7 @@ def crossover(current_population, next_generation, scaled_fitness=None, cumulati
         if SELECTION_METHOD == "SUS":
         # Select until both parents are young enough
             while True:
-                parents = stochastic_universal_sampling(current_population, scaled_fitness, total_scaled, num_parents=2)
+                parents = stochastic_universal_sampling(current_population, scaled_fitness, total_scaled)
                 parent1, parent2 = parents[0], parents[1]
                 if parent1.age <= AGING_MAX_AGE and parent2.age <= AGING_MAX_AGE:
                     break
@@ -246,6 +244,10 @@ def run_genetic_algorithm():
 
         fitness_values = [ind.fitness for ind in current_generation]
         fitness_log.append(fitness_values.copy())
+
+        if FITNESS_MODE == "lcs" or "combined":
+            min_fitness = min(fitness_values)
+            fitness_values = [f - min_fitness + 1 for f in fitness_values]
         
         # Precompute scaled fitness and cumulative sums for RWS/SUS (once per generation)
         scaled_fitness = []
