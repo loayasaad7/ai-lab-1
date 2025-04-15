@@ -1,0 +1,185 @@
+import random
+import numpy as np
+from collections import defaultdict
+
+# Problem data
+bin_capacity = 150
+items = [
+    38, 100, 60, 42, 20, 69, 24, 23, 92, 32, 84, 36, 65, 84, 34, 68, 64, 33, 69, 27,
+    47, 21, 85, 88, 59, 61, 50, 53, 37, 75, 64, 84, 74, 57, 83, 28, 31, 97, 61, 36,
+    46, 37, 96, 80, 53, 51, 68, 90, 64, 81, 66, 67, 80, 37, 92, 67, 64, 31, 94, 45,
+    80, 28, 76, 29, 64, 38, 48, 40, 29, 44, 81, 35, 51, 48, 67, 24, 46, 38, 76, 22,
+    30, 67, 45, 41, 29, 41, 79, 21, 25, 90, 62, 34, 73, 50, 79, 66, 59, 42, 90, 79,
+    70, 66, 80, 35, 62, 98, 97, 37, 32, 75, 91, 91, 48, 26, 23, 32, 100, 46, 29, 26
+]
+num_items = len(items)
+
+# Parameters
+POPULATION_SIZE = 300
+MAX_GENERATIONS = 5000
+INITIAL_MUTATION_RATE = 0.1
+TOURNAMENT_SIZE = 10
+ELITISM_COUNT = 5
+DIVERSITY_THRESHOLD = 30
+MAX_NO_IMPROVEMENT = 300
+
+# Heuristic initialization
+def first_fit_decreasing(items):
+    sorted_items = sorted(items, reverse=True)
+    bins = []
+    for item in sorted_items:
+        placed = False
+        for bin in bins:
+            if sum(bin) + item <= bin_capacity:
+                bin.append(item)
+                placed = True
+                break
+        if not placed:
+            bins.append([item])
+    return bins
+
+# Decoder for individual
+
+def decode_individual(individual):
+    sorted_indices = sorted(range(num_items), key=lambda x: -items[individual[x]])
+    bins = []
+    for idx in sorted_indices:
+        item = items[individual[idx]]
+        best_bin = None
+        best_space = bin_capacity + 1
+        for bin in bins:
+            space = bin_capacity - sum(bin)
+            if space >= item and space < best_space:
+                best_space = space
+                best_bin = bin
+        if best_bin is not None:
+            best_bin.append(item)
+        else:
+            bins.append([item])
+    return bins
+
+# Fitness function
+
+def fitness(individual):
+    bins = decode_individual(individual)
+    num_bins = len(bins)
+    fill_ratios = [sum(bin)/bin_capacity for bin in bins]
+    avg_fill = np.mean(fill_ratios)
+    fill_penalty = np.std(fill_ratios)
+    return (1.0 / num_bins) * (1 + avg_fill) / (1 + fill_penalty)
+
+# Individual creation
+
+def create_individual():
+    individual = list(range(num_items))
+    partial_size = random.randint(num_items//2, num_items)
+    partial = individual[:partial_size]
+    partial.sort(key=lambda x: -items[x])
+    individual[:partial_size] = partial
+    random.shuffle(individual[partial_size:])
+    return individual
+
+# Tournament selection
+
+def tournament_selection(population, fitnesses):
+    tournament = random.sample(list(zip(population, fitnesses)), TOURNAMENT_SIZE)
+    return max(tournament, key=lambda x: x[1])[0]
+
+# Faster PMX Crossover
+
+def pmx_crossover(parent1, parent2):
+    a, b = sorted(random.sample(range(num_items), 2))
+    child = [None] * num_items
+    child[a:b] = parent1[a:b]
+    for i in range(a, b):
+        if parent2[i] not in child:
+            val = parent2[i]
+            pos = i
+            while True:
+                if parent1[pos] not in child:
+                    if child[pos] is None:
+                        child[pos] = val
+                        break
+                    pos = parent1.index(parent2[pos])
+                else:
+                    break
+    for i in range(num_items):
+        if child[i] is None:
+            child[i] = parent2[i]
+    return child
+
+# Mutation
+
+def mutation(individual, mutation_rate):
+    if random.random() < mutation_rate:
+        a, b = random.sample(range(num_items), 2)
+        individual[a], individual[b] = individual[b], individual[a]
+    if random.random() < mutation_rate/2:
+        a, b = sorted(random.sample(range(num_items), 2))
+        random.shuffle(individual[a:b])
+    if random.random() < mutation_rate/3:
+        a, b = sorted(random.sample(range(num_items), 2))
+        individual[a:b] = individual[a:b][::-1]
+    return individual
+
+# Genetic algorithm
+
+def genetic_algorithm():
+    population = [create_individual() for _ in range(POPULATION_SIZE)]
+    ff_indices = sorted(range(num_items), key=lambda x: -items[x])
+    population[0] = ff_indices
+
+    best_fitness = 0
+    best_individual = None
+    no_improvement = 0
+    mutation_rate = INITIAL_MUTATION_RATE
+
+    for generation in range(MAX_GENERATIONS):
+        fitnesses = [fitness(ind) for ind in population]
+
+        current_best = max(fitnesses)
+        if current_best > best_fitness:
+            best_fitness = current_best
+            best_index = fitnesses.index(current_best)
+            best_individual = population[best_index]
+            no_improvement = 0
+        else:
+            no_improvement += 1
+
+        if no_improvement > MAX_NO_IMPROVEMENT:
+            break
+
+        if no_improvement > DIVERSITY_THRESHOLD:
+            mutation_rate = min(0.5, mutation_rate * 1.2)
+            population[POPULATION_SIZE//2:] = [create_individual() for _ in range(POPULATION_SIZE//2)]
+
+        new_population = []
+        elite_indices = np.argsort(fitnesses)[-ELITISM_COUNT:]
+        for idx in elite_indices:
+            new_population.append(population[idx])
+
+        while len(new_population) < POPULATION_SIZE:
+            parent1 = tournament_selection(population, fitnesses)
+            parent2 = tournament_selection(population, fitnesses)
+            child = pmx_crossover(parent1, parent2)
+            child = mutation(child, mutation_rate)
+            new_population.append(child)
+
+        population = new_population
+
+    return best_individual
+
+# Execution
+if __name__ == '__main__':
+    print("Running enhanced GA...")
+    best_solution = genetic_algorithm()
+    best_bins = decode_individual(best_solution)
+    print("\n=== Final Solution ===")
+    print(f"Total bins used: {len(best_bins)}")
+    for i, bin in enumerate(best_bins, 1):
+        print(f"Bin {i:2d}: {bin} (Total: {sum(bin)})")
+
+    # Verification
+    all_assigned = sorted([item for bin in best_bins for item in bin])
+    assert all_assigned == sorted(items), "Error: Items do not match!"
+    print("\nVerification passed - all items packed correctly!")

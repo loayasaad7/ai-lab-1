@@ -70,6 +70,70 @@ class WordMatchProblem(BaseProblem):
 
 
 
+
+class BinPackingProblem(BaseProblem):
+    def __init__(self, items, bin_capacity, **kwargs):
+        super().__init__(**kwargs)
+        self.items = items
+        self.bin_capacity = bin_capacity
+        self.num_items = len(items)
+
+    def create_individual(self):
+        return random.sample(range(self.num_items), self.num_items)
+
+    def evaluate_fitness(self, individual):
+        bins = []
+        bin_loads = []
+        for idx in individual:
+            item_size = self.items[idx]
+            placed = False
+            for i in range(len(bins)):
+                if bin_loads[i] + item_size <= self.bin_capacity:
+                    bins[i].append(idx)
+                    bin_loads[i] += item_size
+                    placed = True
+                    break
+            if not placed:
+                bins.append([idx])
+                bin_loads.append(item_size)
+        return len(bins)  # Minimize the number of bins used
+
+    def get_gene_length(self):
+        return self.num_items
+
+
+
+class BinPackingProblem(BaseProblem):
+    def __init__(self, items, bin_capacity, **kwargs):
+        super().__init__(**kwargs)
+        self.items = items
+        self.bin_capacity = bin_capacity
+        self.num_items = len(items)
+
+    def create_individual(self):
+        return random.sample(range(self.num_items), self.num_items)
+
+    def evaluate_fitness(self, chromosome):
+        bins = []
+        bin_loads = []
+        for idx in chromosome:
+            item_size = self.items[idx]
+            placed = False
+            for i in range(len(bins)):
+                if bin_loads[i] + item_size <= self.bin_capacity:
+                    bins[i].append(idx)
+                    bin_loads[i] += item_size
+                    placed = True
+                    break
+            if not placed:
+                bins.append([idx])
+                bin_loads.append(item_size)
+        return len(bins)  # Fewer bins is better
+
+    def get_gene_length(self):
+        return self.num_items
+
+
 class Individual:
     def __init__(self, genes):
         self.genes = genes
@@ -97,8 +161,10 @@ class GeneticAlgorithm:
             genes[index] = random.choice(string.printable[:95])
             individual.genes = ''.join(genes)
         else:
-            index = random.randint(0, len(individual.genes) - 1)
-            individual.genes[index] = random.randint(0, len(individual.genes) - 1)
+            a, b = random.sample(range(len(individual.genes)), 2)
+            individual.genes[a], individual.genes[b] = individual.genes[b], individual.genes[a]
+
+
 
     def crossover(self, g1, g2):
         if isinstance(g1, str):
@@ -112,7 +178,19 @@ class GeneticAlgorithm:
             elif self.crossover_type == "UNIFORM":
                 return ''.join(random.choice([a, b]) for a, b in zip(g1, g2))
         else:
-            return [random.choice([a, b]) for a, b in zip(g1, g2)]
+            # Order Crossover for permutations
+            size = len(g1)
+            child = [None] * size
+            start, end = sorted(random.sample(range(size), 2))
+            child[start:end+1] = g1[start:end+1]
+            pointer = 0
+            for gene in g2:
+                if gene not in child:
+                    while child[pointer] is not None:
+                        pointer += 1
+                    child[pointer] = gene
+            return child
+
 
     def select_parent(self, population, scaled, cumulative, total):
         if self.selection_method == "RWS":
@@ -166,7 +244,10 @@ class GeneticAlgorithm:
                 print(f"Gen {gen}: best={fitness_vals[0]}")
 
             if self.selection_method in {"RWS", "SUS"}:
-                scaled = [1 / (f + 1) for f in fitness_vals]
+                min_fitness = min(fitness_vals)
+                offset = -min_fitness + 1 if min_fitness <= 0 else 0
+                scaled = [1 / (f + offset) for f in fitness_vals]
+
                 total = sum(scaled)
                 cumulative = np.cumsum(scaled).tolist()
             else:
