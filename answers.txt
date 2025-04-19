@@ -1,0 +1,9 @@
+"C:\courses\Ai-lab1\ai-lab-1\input.txt"    #this line should contain the path to the problem we want to solve. check the input file
+binpack 				   #here we write the problem type (word / binpack)
+UNIFORM  				   #the crossover we want (SINGLE / TWO / UNIFORM)
+SUS					   #the parent selection method (RWS / SUS / TOURNAMENT / STOCHASTIC_TOURNAMENT)
+
+
+
+#please delete all the comments in this file before using!!!
+#the input file must contain ### to check if we are in the propriate file second line contain the target string third contain the problem binpacking problem information's (maximum bin capacity - num of items - theoretical best bins needed) and the rest of the values in the lines are the items themselves 

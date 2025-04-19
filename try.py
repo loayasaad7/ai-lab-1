@@ -1,3 +1,4 @@
+import sys
 import time
 import random
 import string
@@ -6,609 +7,358 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import copy
 
+# =============================================================================
+# GA Input Loader
+# =============================================================================
+def load_ga_input(path: str):
+    """
+    Reads a single TXT file in this exact format:
+      Line 1: exactly “###”                         <-- file‐format check
+      Line 2: target string for the word problem
+      Line 3: three ints: <bin_capacity> <num_items> <theoretical_best_bins>
+      Lines 4+: one item weight (int) per line
+    Returns:
+      target (str),
+      bin_capacity (int),
+      items (list[int]),
+      theoretical_best (int)
+    """
+    with open(path, 'r', encoding='utf-8') as f:
+        # drop any empty lines but preserve order
+        lines = [ln.rstrip('\n') for ln in f if ln.strip()]
 
-# ============================
-# Abstract base class for problems
-# ============================
-# ============================================
-# BaseProblem: Abstract class for problem setup
-# --------------------------------------------
-# This class serves as a template for any problem that can be solved using a Genetic Algorithm.
-# It enforces a structure that derived classes (like WordMatchProblem or BinPackingProblem) must follow.
-# ============================================
+    # 1) sanity check header
+    if not lines or lines[0].strip() != "###":
+        raise ValueError("Input file must start with ### on line 1")
+
+    # 2) ensure at least 3 lines
+    if len(lines) < 3:
+        raise ValueError("Input file too short; needs at least 3 lines")
+
+    # 3) line 2 is the word target
+    target = lines[1]
+
+    # 4) line 3 has capacity, count, theoretical best
+    parts = lines[2].split()
+    if len(parts) != 3:
+        raise ValueError("Line 3 must have exactly 3 numbers: capacity, num_items, theoretical_best")
+    bin_capacity, num_items, theoretical_best = map(int, parts)
+
+    # 5) remaining lines are item weights
+    items = [int(x) for x in lines[3:]]
+    if len(items) != num_items:
+        print(f"Warning: declared {num_items} items but found {len(items)} lines")
+
+    return target, bin_capacity, items, theoretical_best
+
+
+# =========================
+# Abstract base class
+# =========================
 class BaseProblem:
     def __init__(self, population_size, max_generations, elitism_ratio, mutation_rate,
                  no_improvement_limit, aging_max_age, tournament_k, stochastic_p):
-        # Number of individuals in each generation
-        self.population_size = population_size
-        
-        # Maximum number of generations to run the algorithm
-        self.max_generations = max_generations
-        
-        # Proportion of top-performing individuals that survive directly to the next generation
-        self.elitism_ratio = elitism_ratio
-        
-        # Probability of applying mutation to a new individual
-        self.mutation_rate = mutation_rate
-        
-        # If no improvement happens for this many generations, stop early
+        self.population_size      = population_size
+        self.max_generations      = max_generations
+        self.elitism_ratio        = elitism_ratio
+        self.mutation_rate        = mutation_rate
         self.no_improvement_limit = no_improvement_limit
-        
-        # Maximum age an individual can reach before it is discarded
-        self.aging_max_age = aging_max_age
-        
-        # Number of individuals competing in tournament selection
-        self.tournament_k = tournament_k
-        
-        # Probability used in stochastic tournament selection (to prefer best vs. randomly choosing others)
-        self.stochastic_p = stochastic_p
+        self.aging_max_age        = aging_max_age
+        self.tournament_k         = tournament_k
+        self.stochastic_p         = stochastic_p
 
-    # Each subclass must implement how to create a random individual (solution candidate)
     def create_individual(self):
         raise NotImplementedError
 
-    # Each subclass must define how to compute fitness (quality) of a solution
     def evaluate_fitness(self, individual):
         raise NotImplementedError
 
-    # Returns the length of the chromosome or solution representation
     def get_gene_length(self):
         raise NotImplementedError
 
 
-# =============================================================
-# WordMatchProblem: A specific problem for evolving strings
-# -------------------------------------------------------------
-# The goal is to evolve a string to match a target word or phrase
-# using one of several fitness evaluation strategies.
-# =============================================================
+# =========================
+# Word‐matching problem
+# =========================
 class WordMatchProblem(BaseProblem):
     def __init__(self, target, fitness_mode, **kwargs):
-        # Initialize the problem using BaseProblem parameters
         super().__init__(**kwargs)
-
-        # The target string we are trying to evolve toward
-        self.target = target
-
-        # Length of the target (also the chromosome length)
-        self.length = len(target)
-
-        # Fitness mode: defines how we evaluate closeness
-        # Options: "ascii", "lcs", or "combined"
+        self.target       = target
+        self.length       = len(target)
         self.fitness_mode = fitness_mode
 
-    # Creates a random individual (string) of the same length as the target
     def create_individual(self):
-        # We use printable ASCII characters (first 95)
         return ''.join(random.choice(string.printable[:95]) for _ in range(self.length))
 
-    # Evaluates the fitness of a string based on the selected fitness mode
     def evaluate_fitness(self, genes):
         if self.fitness_mode == "ascii":
-            # ASCII Distance: sum of absolute differences in character codes
             return sum(abs(ord(genes[i]) - ord(self.target[i])) for i in range(self.length))
-        
         elif self.fitness_mode == "lcs":
-            # LCS Distance: negative length of longest common subsequence
-            # (Negative so GA minimizes the fitness score)
             return -self.lcs_length(genes, self.target)
-        
-        elif self.fitness_mode == "combined":
-            # Combines ASCII distance and LCS bonus
-            ascii_distance = sum(abs(ord(genes[i]) - ord(self.target[i])) for i in range(self.length))
-            lcs_score = self.lcs_length(genes, self.target)
-            return ascii_distance - (lcs_score * 2)
+        else:  # combined
+            ascii_dist = sum(abs(ord(genes[i]) - ord(self.target[i])) for i in range(self.length))
+            lcs_score  = self.lcs_length(genes, self.target)
+            return ascii_dist - (2 * lcs_score)
 
-    # Returns the gene length for this problem
     def get_gene_length(self):
         return self.length
 
-    # Computes the Longest Common Subsequence (LCS) between two strings
-    # Used as part of the LCS and combined fitness strategies
     @staticmethod
     def lcs_length(a, b):
-        # Dynamic programming approach to LCS
         table = [[0] * (len(b) + 1) for _ in range(len(a) + 1)]
-        for i in range(1, len(a) + 1):
-            for j in range(1, len(b) + 1):
-                if a[i - 1] == b[j - 1]:
-                    table[i][j] = table[i - 1][j - 1] + 1
+        for i in range(1, len(a)+1):
+            for j in range(1, len(b)+1):
+                if a[i-1] == b[j-1]:
+                    table[i][j] = table[i-1][j-1] + 1
                 else:
-                    table[i][j] = max(table[i - 1][j], table[i][j - 1])
+                    table[i][j] = max(table[i-1][j], table[i][j-1])
         return table[-1][-1]
 
 
-
-
-
-
-# =============================================================
-# BinPackingProblem: Solves the Bin Packing problem using GA
-# -------------------------------------------------------------
-# The goal is to minimize the number of bins used to pack items.
-# Chromosomes are permutations of item indices (not sizes).
-# =============================================================
+# =========================
+# Bin‐packing problem
+# =========================
 class BinPackingProblem(BaseProblem):
     def __init__(self, items, bin_capacity, **kwargs):
         super().__init__(**kwargs)
-
-        # List of item sizes to be packed
-        self.items = items
-
-        # Maximum capacity of each bin
+        self.items        = items
         self.bin_capacity = bin_capacity
+        self.num_items    = len(items)
 
-        # Total number of items
-        self.num_items = len(items)
-
-    # Generates a random permutation of item indices (a chromosome)
     def create_individual(self):
         return random.sample(range(self.num_items), self.num_items)
 
-    # Evaluates how many bins are needed to pack items in this order
     def evaluate_fitness(self, individual):
-        bins = []       # Tracks which item indices are in which bin
-        bin_loads = []  # Tracks current load of each bin
-
+        bins, loads = [], []
         for idx in individual:
-            item_size = self.items[idx]
+            size = self.items[idx]
             placed = False
-
-            # Try placing item into existing bins
             for i in range(len(bins)):
-                if bin_loads[i] + item_size <= self.bin_capacity:
+                if loads[i] + size <= self.bin_capacity:
                     bins[i].append(idx)
-                    bin_loads[i] += item_size
+                    loads[i] += size
                     placed = True
                     break
-
-            # Otherwise, create a new bin
             if not placed:
                 bins.append([idx])
-                bin_loads.append(item_size)
-
-        # Fitness = number of bins used (lower is better)
+                loads.append(size)
         return len(bins)
 
-    # Returns length of the chromosome (number of items)
     def get_gene_length(self):
         return self.num_items
 
 
-
-# ===========================================================
-# Individual: Represents a single candidate solution (chromosome)
-# -----------------------------------------------------------
-# Each individual holds:
-#   - its gene sequence (solution encoding)
-#   - its fitness score (how good the solution is)
-#   - its age (for aging/selection purposes)
-# ===========================================================
+# =========================
+# Individual wrapper
+# =========================
 class Individual:
     def __init__(self, genes):
-        # The genetic representation of the solution
-        # For WordMatch: a string
-        # For BinPacking: a list of item indices (permutation)
-        self.genes = genes
-
-        # Fitness value: how good this solution is (to be set later)
+        self.genes   = genes
         self.fitness = None
-
-        # Age: counts how many generations this individual has survived
-        self.age = 0
+        self.age     = 0
 
 
-
-# ==================================================================
-# GeneticAlgorithm: Core evolutionary engine for solving problems
-# ------------------------------------------------------------------
-# Handles all key steps:
-#   - Population initialization
-#   - Selection, crossover, mutation
-#   - Fitness evaluation
-#   - Supports multiple encoding types (strings, permutations)
-# ==================================================================
+# =========================
+# Core GA engine
+# =========================
 class GeneticAlgorithm:
     def __init__(self, problem: BaseProblem, selection_method: str, crossover_type: str):
-        # Problem instance (must inherit from BaseProblem)
-        self.problem = problem
-
-        # Selection method: "RWS", "SUS", "TOURNAMENT", "STOCHASTIC_TOURNAMENT"
+        self.problem          = problem
         self.selection_method = selection_method.upper()
+        self.crossover_type   = crossover_type.upper()
 
-        # Crossover type: "SINGLE", "TWO", "UNIFORM"
-        self.crossover_type = crossover_type.upper()
-
-    # Creates the initial population of Individuals
     def create_population(self):
-        return [Individual(self.problem.create_individual()) for _ in range(self.problem.population_size)]
+        return [Individual(self.problem.create_individual())
+                for _ in range(self.problem.population_size)]
 
-    # Calculates fitness for each individual in the population
-    def evaluate_population(self, population):
-        for individual in population:
-            individual.fitness = self.problem.evaluate_fitness(individual.genes)
+    def evaluate_population(self, pop):
+        for ind in pop:
+            ind.fitness = self.problem.evaluate_fitness(ind.genes)
 
-    # Mutation operation: alters genes to introduce variation
-    def mutate(self, individual):
-        if isinstance(individual.genes, str):
-            # For strings: randomly change one character
-            index = random.randint(0, len(individual.genes) - 1)
-            genes = list(individual.genes)
-            genes[index] = random.choice(string.printable[:95])
-            individual.genes = ''.join(genes)
+    def mutate(self, ind: Individual):
+        genes = ind.genes
+        if isinstance(genes, str):
+            i = random.randrange(len(genes))
+            lst = list(genes)
+            lst[i] = random.choice(string.printable[:95])
+            ind.genes = ''.join(lst)
         else:
-            # For permutations: swap two random positions
-            a, b = random.sample(range(len(individual.genes)), 2)
-            individual.genes[a], individual.genes[b] = individual.genes[b], individual.genes[a]
+            a, b = random.sample(range(len(genes)), 2)
+            genes[a], genes[b] = genes[b], genes[a]
 
-    # Crossover operation: combines genes from two parents to produce a child
     def crossover(self, g1, g2):
         if isinstance(g1, str):
-            # String-based crossover
             if self.crossover_type == "SINGLE":
-                point = random.randint(1, len(g1) - 1)
-                return g1[:point] + g2[point:]
-
+                p = random.randint(1, len(g1)-1)
+                return g1[:p] + g2[p:]
             elif self.crossover_type == "TWO":
-                p1 = random.randint(0, len(g1) - 2)
-                p2 = random.randint(p1 + 1, len(g1) - 1)
+                p1 = random.randint(0, len(g1)-2)
+                p2 = random.randint(p1+1, len(g1)-1)
                 return g1[:p1] + g2[p1:p2] + g1[p2:]
-
-            elif self.crossover_type == "UNIFORM":
-                return ''.join(random.choice([a, b]) for a, b in zip(g1, g2))
+            else:  # UNIFORM
+                return ''.join(random.choice([a,b]) for a,b in zip(g1,g2))
         else:
-            # Permutation-based crossover (Order Crossover)
-            size = len(g1)
-            child = [None] * size
-            start, end = sorted(random.sample(range(size), 2))
-            child[start:end+1] = g1[start:end+1]
-
-            pointer = 0
+            size  = len(g1)
+            child = [None]*size
+            s,e   = sorted(random.sample(range(size),2))
+            child[s:e+1] = g1[s:e+1]
+            ptr = 0
             for gene in g2:
                 if gene not in child:
-                    while child[pointer] is not None:
-                        pointer += 1
-                    child[pointer] = gene
-
+                    while child[ptr] is not None:
+                        ptr += 1
+                    child[ptr] = gene
             return child
 
-    # Selection mechanism to choose a parent from population
-    def select_parent(self, population, scaled, cumulative, total):
+    def select_parent(self, pop, scaled, cumulative, total):
         if self.selection_method == "RWS":
-            # Roulette Wheel Selection
             pick = random.uniform(0, total)
             for i, cum in enumerate(cumulative):
                 if pick <= cum:
-                    return population[i]
-
+                    return pop[i]
         elif self.selection_method == "TOURNAMENT":
-            # Tournament Selection (pick k and choose best)
-            return sorted(random.sample(population, self.problem.tournament_k), key=lambda x: x.fitness)[0]
-
+            return min(random.sample(pop, self.problem.tournament_k),
+                       key=lambda x: x.fitness)
         elif self.selection_method == "STOCHASTIC_TOURNAMENT":
-            # Stochastic Tournament: choose best with prob p, or a random loser
-            competitors = sorted(random.sample(population, self.problem.tournament_k), key=lambda x: x.fitness)
-            return competitors[0] if random.random() < self.problem.stochastic_p else random.choice(competitors[1:])
-
-        elif self.selection_method == "SUS":
-            # Stochastic Universal Sampling
+            group = sorted(random.sample(pop, self.problem.tournament_k),
+                           key=lambda x: x.fitness)
+            return group[0] if random.random() < self.problem.stochastic_p \
+                             else random.choice(group[1:])
+        else:  # SUS
             spacing = total / 2
-            start = random.uniform(0, spacing)
-            pointers = [start + i * spacing for i in range(2)]
-            selected, cumulative_sum, pointer_index = [], 0, 0
-            for i, fitness_val in enumerate(scaled):
-                cumulative_sum += fitness_val
-                while pointer_index < len(pointers) and cumulative_sum >= pointers[pointer_index]:
-                    selected.append(population[i])
-                    pointer_index += 1
+            start   = random.uniform(0, spacing)
+            pointers = [start + i*spacing for i in range(2)]
+            selected, cum_sum, idx = [], 0, 0
+            for i,val in enumerate(scaled):
+                cum_sum += val
+                while idx < len(pointers) and cum_sum >= pointers[idx]:
+                    selected.append(pop[i])
+                    idx += 1
             return selected[0]
 
     def run(self):
-        pop = self.create_population()
-        next_gen = [Individual(self.problem.create_individual()) for _ in range(self.problem.population_size)]
-
-        stats, fit_log = [], []
-        best_fitness, no_improve = None, 0
+        pop      = self.create_population()
+        next_gen = [Individual(self.problem.create_individual())
+                    for _ in range(self.problem.population_size)]
+        fit_log, best_fit, no_imp = [], None, 0
 
         for gen in range(self.problem.max_generations):
             self.evaluate_population(pop)
             pop.sort(key=lambda x: x.fitness)
-            # === Optional Diversity Metrics ===
-            # print("Avg Hamming Distance:", average_hamming_distance(pop))
-            # print("Total Unique Alleles :", get_total_unique_alleles(pop))
-            # print("Avg Shannon Entropy  :", get_avg_entropy(pop))
 
-            # Check for perfect match
+            # target‐match stop for word‐problem
             if isinstance(pop[0].genes, str) and pop[0].genes == self.problem.target:
-                print(f"Target matched at generation {gen}: {pop[0].genes}")
+                print(f"Matched '{pop[0].genes}' at generation {gen}")
                 break
 
+            vals = [ind.fitness for ind in pop]
+            fit_log.append(vals.copy())
 
-            fitness_vals = [ind.fitness for ind in pop]
-            fit_log.append(fitness_vals.copy())
-
-            if best_fitness is None or fitness_vals[0] < best_fitness:
-                best_fitness = fitness_vals[0]
-                no_improve = 0
+            # early‐stop on no improvement
+            if best_fit is None or vals[0] < best_fit:
+                best_fit, no_imp = vals[0], 0
             else:
-                no_improve += 1
-                if no_improve >= self.problem.no_improvement_limit:
-                    print("Stopping early due to no improvement.")
+                no_imp += 1
+                if no_imp >= self.problem.no_improvement_limit:
+                    print("No improvement—stopping early.")
                     break
 
+            # print progress
             if isinstance(pop[0].genes, str):
-                print(f"Gen {gen}: best={fitness_vals[0]} match={pop[0].genes}")
+                print(f"Gen {gen}: best={vals[0]} match={pop[0].genes}")
             else:
-                print(f"Gen {gen}: best={fitness_vals[0]}")
+                print(f"Gen {gen}: best bins={vals[0]}")
 
-            if self.selection_method in {"RWS", "SUS"}:
-                min_fitness = min(fitness_vals)
-                offset = -min_fitness + 1 if min_fitness <= 0 else 0
-                scaled = [1 / (f + offset) for f in fitness_vals]
-
-                total = sum(scaled)
+            # prepare selection weights if needed
+            if self.selection_method in ("RWS","SUS"):
+                min_val = min(vals)
+                offset  = -min_val+1 if min_val <= 0 else 0
+                scaled  = [1/(v+offset) for v in vals]
+                total   = sum(scaled)
                 cumulative = np.cumsum(scaled).tolist()
             else:
                 scaled, cumulative, total = [], [], 0
 
+            # copy elites
             elite_size = int(self.problem.population_size * self.problem.elitism_ratio)
             for i in range(elite_size):
-                next_gen[i].genes = pop[i].genes
+                next_gen[i].genes   = pop[i].genes
                 next_gen[i].fitness = pop[i].fitness
 
+            # fill rest by crossover+mutation
             for i in range(elite_size, self.problem.population_size):
                 p1 = self.select_parent(pop, scaled, cumulative, total)
                 p2 = self.select_parent(pop, scaled, cumulative, total)
-
                 while p1.age > self.problem.aging_max_age:
                     p1 = self.select_parent(pop, scaled, cumulative, total)
                 while p2.age > self.problem.aging_max_age:
                     p2 = self.select_parent(pop, scaled, cumulative, total)
 
-                child_genes = self.crossover(p1.genes, p2.genes)
-                child = Individual(child_genes)
+                child = Individual(self.crossover(p1.genes, p2.genes))
                 if random.random() < self.problem.mutation_rate:
                     self.mutate(child)
                 next_gen[i] = child
 
+            # age bump
             for ind in pop:
                 ind.age += 1
 
             pop, next_gen = next_gen, pop
+
+        # final report
         if isinstance(pop[0].genes, str):
-            print(f"Gen {gen}: best={fitness_vals[0]} match={pop[0].genes}")
+            print(f"Final: best={pop[0].fitness}, match={pop[0].genes}")
         else:
-            print(f"Gen {gen}: best={fitness_vals[0]} bins={pop[0].genes}")
-        # Check for perfect match
-        
+            print(f"Final: best bins={pop[0].fitness}")
+
+        return pd.DataFrame(), fit_log
 
 
-        return pd.DataFrame(stats), fit_log
+# =============================================================================
+# Main entry: “word” or “binpack”
+# =============================================================================
+if __name__ == '__main__':
+    raw = input("Path to your GA‑input file: ").strip()
+    input_path = raw.strip('"').strip("'")
 
-# =======================================================================
-# best_fit_bin_packing:
-# -----------------------------------------------------------------------
-# Greedy heuristic for the Bin Packing Problem using the Best-Fit method.
-# It places each item into the bin with the least remaining space 
-# that still fits the item.
-# Returns the total number of bins used.
-# =======================================================================
-def best_fit_bin_packing(items, bin_capacity):
-    bins = []  # Each bin is a list of items currently packed in it
+    try:
+        target, bin_capacity, items, theoretical_best = load_ga_input(input_path)
+    except Exception as e:
+        print("Error loading file:", e)
+        sys.exit(1)
 
-    for item in items:
-        best_bin = -1             # Index of the best bin to place this item
-        min_space = bin_capacity + 1  # Track the least leftover space
+    choice = input("Which problem to run? (word / binpack): ").strip().lower()
+    if choice == 'word':
+        mode   = input("Fitness mode (ascii / lcs / combined): ").strip().lower()
+        xover  = input("Crossover (SINGLE / TWO / UNIFORM): ").strip().upper()
+        select = input("Selection (RWS / SUS / TOURNAMENT / STOCHASTIC_TOURNAMENT): ").strip().upper()
 
-        # Check all current bins to find the best fit
-        for i, b in enumerate(bins):
-            remaining = bin_capacity - sum(b)
-            if item <= remaining and remaining < min_space:
-                min_space = remaining
-                best_bin = i
-
-        # If no suitable bin found, create a new one
-        if best_bin == -1:
-            bins.append([item])
-        else:
-            bins[best_bin].append(item)
-
-    return len(bins)  # Return total bins used
-
-
-# =====================
-# Diversity Analysis Tools (for WordMatchProblem only)
-# =====================
-
-"""
-# Measures how different the individuals are on average.
-def average_hamming_distance(population):
-    total_dif = 0
-    count = 0
-    for i in range(len(population)):
-        for j in range(i + 1, len(population)):
-            dist = sum(a != b for a, b in zip(population[i].genes, population[j].genes))
-            total_dif += dist
-            count += 1
-    return total_dif / count
-
-# Counts how many unique characters appear at each gene position.
-def get_total_unique_alleles(population):
-    gene_len = len(population[0].genes)
-    total_unique = 0
-    for position in range(gene_len):
-        alleles = set(ind.genes[position] for ind in population)
-        total_unique += len(alleles)
-    return total_unique
-
-# Measures population diversity using Shannon entropy.
-def get_avg_entropy(population):
-    gene_length = len(population[0].genes)
-    theTotal_entrop = 0
-    for position in range(gene_length):
-        allele_counts = {}
-        for individual in population:
-            allele = individual.genes[position]
-            allele_counts[allele] = allele_counts.get(allele, 0) + 1
-        probabilities = [count / len(population) for count in allele_counts.values()]
-        entropy_here = -sum(p * np.log2(p) for p in probabilities if p > 0)
-        theTotal_entrop += entropy_here
-    return theTotal_entrop / gene_length
-"""
-
-# =========================
-# Choose and initialize problem
-# =========================
-u120_00_capacity = 150
-u120_00 = [
-    42, 69, 67, 57, 93, 90, 38, 36, 45, 42, 33, 79, 27, 57, 44, 84, 86, 92, 46, 38,
-    85, 33, 82, 73, 49, 70, 59, 23, 57, 72, 74, 69, 33, 42, 28, 46, 30, 64, 29, 74,
-    41, 49, 55, 98, 80, 32, 25, 38, 82, 30, 35, 39, 57, 84, 62, 50, 55, 27, 30, 36,
-    20, 78, 47, 26, 45, 41, 58, 98, 91, 96, 73, 84, 37, 93, 91, 43, 73, 85, 81, 79,
-    71, 80, 76, 83, 41, 78, 70, 23, 42, 87, 43, 84, 60, 55, 49, 78, 73, 62, 36, 44,
-    94, 69, 32, 96, 70, 84, 58, 78, 25, 80, 58, 66, 83, 24, 98, 60, 42, 43, 43, 39
-]
-
-u120_01_capacity = 150
-u120_01 = [
-    97, 57, 81, 62, 75, 81, 23, 43, 50, 38, 60, 58, 70, 88, 36, 90, 37, 45, 45, 39,
-    44, 53, 70, 24, 82, 81, 47, 97, 35, 65, 74, 68, 49, 55, 52, 94, 95, 29, 99, 20,
-    22, 25, 49, 46, 98, 59, 98, 60, 23, 72, 33, 98, 80, 95, 78, 57, 67, 53, 47, 53,
-    36, 38, 92, 30, 80, 32, 97, 39, 80, 72, 55, 41, 60, 67, 53, 65, 95, 20, 66, 78,
-    98, 47, 100, 85, 53, 53, 67, 27, 22, 61, 43, 52, 76, 64, 61, 29, 30, 46, 79, 66,
-    27, 79, 98, 90, 22, 75, 57, 67, 36, 70, 99, 48, 43, 45, 71, 100, 88, 48, 27, 39
-]
-
-u120_02_capacity = 150
-u120_02 = [
-    38, 100, 60, 42, 20, 69, 24, 23, 92, 32, 84, 36, 65, 84, 34, 68, 64, 33, 69, 27,
-    47, 21, 85, 88, 59, 61, 50, 53, 37, 75, 64, 84, 74, 57, 83, 28, 31, 97, 61, 36,
-    46, 37, 96, 80, 53, 51, 68, 90, 64, 81, 66, 67, 80, 37, 92, 67, 64, 31, 94, 45,
-    80, 28, 76, 29, 64, 38, 48, 40, 29, 44, 81, 35, 51, 48, 67, 24, 46, 38, 76, 22,
-    30, 67, 45, 41, 29, 41, 79, 21, 25, 90, 62, 34, 73, 50, 79, 66, 59, 42, 90, 79,
-    70, 66, 80, 35, 62, 98, 97, 37, 32, 75, 91, 91, 48, 26, 23, 32, 100, 46, 29, 26
-]
-
-u120_03_capacity = 150
-u120_03 = [
-    29, 26, 83, 82, 92, 95, 87, 63, 57, 100, 63, 65, 81, 46, 42, 95, 90, 80, 53, 27,
-    84, 40, 22, 97, 20, 73, 63, 95, 46, 42, 47, 40, 26, 88, 49, 24, 92, 87, 68, 95,
-    34, 82, 84, 43, 54, 73, 66, 32, 62, 48, 99, 90, 86, 28, 25, 25, 89, 67, 96, 35,
-    33, 70, 40, 59, 32, 94, 34, 86, 35, 45, 25, 76, 80, 42, 91, 44, 91, 97, 60, 29,
-    45, 37, 61, 54, 78, 56, 74, 74, 45, 21, 96, 37, 75, 100, 58, 84, 85, 56, 54, 71,
-    52, 79, 43, 35, 27, 70, 31, 47, 35, 26, 30, 97, 90, 80, 58, 60, 73, 46, 71, 39
-]
-
-u120_04_capacity = 150
-u120_04 = [
-    42, 98, 27, 21, 71, 71, 78, 76, 57, 24, 91, 84, 35, 25, 77, 96, 97, 89, 30, 86,
-    81, 39, 75, 66, 85, 36, 60, 56, 50, 75, 75, 37, 87, 95, 21, 99, 42, 57, 31, 37,
-    42, 40, 69, 91, 45, 97, 84, 90, 52, 43, 68, 53, 37, 65, 79, 73, 92, 87, 20, 20,
-    73, 42, 52, 20, 24, 76, 71, 72, 21, 21, 82, 92, 78, 87, 50, 41, 31, 73, 89, 59,
-    88, 40, 71, 69, 45, 57, 49, 68, 84, 32, 69, 77, 92, 98, 57, 39, 32, 23, 99, 91,
-    48, 21, 70, 43, 73, 69, 65, 57, 67, 28, 84, 42, 61, 92, 82, 34, 74, 55, 60, 69
-]
-
-problem_choice = input("Choose problem (word / binpack): ").strip().lower()
-
-if problem_choice == "word":
-    target = "loay,mohammad"
-    fitness_mode = input("Choose fitness mode (ascii / lcs / combined): ").strip().lower()
-    crossover_type = input("Enter crossover type (SINGLE / TWO / UNIFORM): ").strip().upper()
-    selection_method = input("Enter selection method (RWS / SUS / TOURNAMENT / STOCHASTIC_TOURNAMENT): ").strip().upper()
-
-    problem = WordMatchProblem(target=target, fitness_mode=fitness_mode,
-        population_size=512, max_generations=500, elitism_ratio=0.1, mutation_rate=0.25,
-        no_improvement_limit=50, aging_max_age=10, tournament_k=5, stochastic_p=0.8)
-
-    ga = GeneticAlgorithm(problem, selection_method, crossover_type)
-    results_df, fitness_log = ga.run()
-
-    # Fitness Line Plot
-    if not results_df.empty:
-        plt.figure(figsize=(12, 6))
-        plt.plot(results_df['Generation'], results_df['Best Fitness'], label='Best Fitness', linewidth=2)
-        plt.plot(results_df['Generation'], results_df['Average Fitness'], label='Average Fitness', linestyle='--')
-        plt.plot(results_df['Generation'], results_df['Worst Fitness'], label='Worst Fitness', linestyle=':')
-        plt.title('Fitness Progression Over Generations')
-        plt.xlabel('Generation')
-        plt.ylabel('Fitness')
-        plt.legend()
-        plt.grid(True)
-        plt.tight_layout()
-        plt.show()
-
-    # Fitness Boxplot (if data is available)
-    if fitness_log and isinstance(fitness_log[0], list):
-        plt.figure(figsize=(14, 6))
-        plt.boxplot(fitness_log, vert=True, patch_artist=True, showfliers=True)
-        plt.title('Fitness Distribution Per Generation (Boxplot)')
-        plt.xlabel('Generation')
-        plt.ylabel('Fitness')
-        plt.grid(True)
-        plt.tight_layout()
-        plt.show()
-
-
-elif problem_choice == "binpack":
-    # Ask for settings once for all problems
-    crossover_type = input("Enter crossover type (SINGLE / TWO / UNIFORM): ").strip().upper()
-    selection_method = input("Enter selection method (RWS / SUS / TOURNAMENT / STOCHASTIC_TOURNAMENT): ").strip().upper()
-
-    # Your existing problem data
-    binpack_problems = [
-        ("u120_00", u120_00, u120_00_capacity),
-        ("u120_01", u120_01, u120_01_capacity),
-        ("u120_02", u120_02, u120_02_capacity),
-        ("u120_03", u120_03, u120_03_capacity),
-        ("u120_04", u120_04, u120_04_capacity)
-    ]
-
-    results = []
-
-    for name, items, capacity in binpack_problems:
-        print(f"\nRunning Problem: {name}")
-        
-        problem = BinPackingProblem(
-            items=items,
-            bin_capacity=capacity,
-            population_size=500,
-            max_generations=1000,
-            elitism_ratio=0.1,
-            mutation_rate=0.25,
-            no_improvement_limit=200,
-            aging_max_age=8,
-            tournament_k=5,
-            stochastic_p=0.75
+        prob = WordMatchProblem(
+            target=target, fitness_mode=mode,
+            population_size=512, max_generations=500,
+            elitism_ratio=0.1, mutation_rate=0.25,
+            no_improvement_limit=50, aging_max_age=10,
+            tournament_k=5, stochastic_p=0.8
         )
-        ga = GeneticAlgorithm(problem, selection_method=selection_method, crossover_type=crossover_type)
-        _, fit_log = ga.run()
-        ga_result = min(fit_log[-1]) if fit_log else None
+        ga = GeneticAlgorithm(prob, select, xover)
+        ga.run()
 
-        bf_result = best_fit_bin_packing(items, capacity)
+    elif choice == 'binpack':
+        xover  = input("Crossover (SINGLE / TWO / UNIFORM): ").strip().upper()
+        select = input("Selection (RWS / SUS / TOURNAMENT / STOCHASTIC_TOURNAMENT): ").strip().upper()
 
-        results.append({
-            "Problem": name,
-            "GA Bins Used": ga_result,
-            "Best-Fit Bins Used": bf_result
-        })
+        prob = BinPackingProblem(
+            items=items, bin_capacity=bin_capacity,
+            population_size=500, max_generations=1000,
+            elitism_ratio=0.1, mutation_rate=0.25,
+            no_improvement_limit=200, aging_max_age=8,
+            tournament_k=5, stochastic_p=0.75
+        )
+        ga = GeneticAlgorithm(prob, select, xover)
+        ga.run()
+        print(f"\nTheoretical best‑possible bins for this instance: {theoretical_best}")
 
-    # Final Display
-    df = pd.DataFrame(results)
-    print("\n======================== Bin Packing Results ========================")
-    print(df.to_string(index=False))
 
-
-else:
-    raise ValueError("Invalid problem type")
-
-# Optionally: Plot fitness log for visualization (only useful for word match or numeric fitness)
-if fitness_log and isinstance(fitness_log[0], list):
-    plt.figure(figsize=(12, 6))
-    plt.boxplot(fitness_log, vert=True, patch_artist=True, showfliers=True)
-    plt.title('Fitness Distribution Per Generation')
-    plt.xlabel('Generation')
-    plt.ylabel('Fitness')
-    plt.grid(True)
-    plt.tight_layout()
-    plt.show()
+    else:
+        print("Invalid choice; must be 'word' or 'binpack'")
+        sys.exit(1)
